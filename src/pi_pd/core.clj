@@ -1,9 +1,11 @@
 (ns pi-pd.core
   (:require [com.rpl.specter :as specter]
+            [clojure.core.async :as a]
             [incanter
              [core :as incanter]
              [stats :as i-stats]
-             [charts :as i-charts]]))
+             [charts :as i-charts]]
+            [pi-pd.gen :as gen]))
 
 (defn clamp
   [mx n mn]
@@ -19,6 +21,71 @@
   (atom []))
 (def ^:dynamic *consts*
   nil)
+
+
+;;;; Clock Stuff ;;;;
+
+
+(def ^:dynamic *clock-time*
+  (atom 0))
+
+(def _clock-c (a/chan 100))
+(def clock-c (a/mult _clock-c))
+
+(defmacro with-clock
+  [t & body]
+  `(binding [*clock-time* (atom ~t)]
+     (a/put! _clock-c ~t)
+     ~@body))
+
+(defn increment-clock
+  [by-t]
+  (a/>!! _clock-c (+ by-t @*clock-time*))
+  (swap! *clock-time* + by-t))
+
+(defn run-at! [f t]
+  (let [local-clock-c (a/tap clock-c (a/chan))]
+    (a/go-loop []
+      (if-let [clock-time (a/<! local-clock-c)]
+        (if (>= clock-time t)
+          (do (a/untap clock-c local-clock-c)
+              (f))
+          (recur))
+        nil))))
+
+(declare ^:dynamic *metrics*)
+
+(defn simulate-work!
+  [{:keys [arrival-time finish-time]}]
+  (run-at! (fn []
+             (swap! *metrics*
+                    #(-> %
+                         (update :running (fnil inc 0)))))
+           arrival-time)
+
+  (run-at! (fn []
+             (swap! *metrics*
+                    #(-> %
+                         (update :successes (fnil inc 0))
+                         (update :running (fnil dec 0)))))
+           finish-time))
+
+(comment
+  (binding [*metrics* (atom {:running 0, :successes 0, :errors 0})]
+    (with-clock 0
+      (doseq [e (first (gen/make-simulation))]
+        (simulate-work! e))
+      (doseq [i (range 200)]
+        (increment-clock 1)
+        (Thread/sleep 1)
+        (println @*metrics*))
+      (Thread/sleep 100))))
+
+;;;;;;;;;;;;;;;;;;;;;
+
+
+(defn run-sim
+  [sim])
 
 (defn pi-pd
   [{:keys [pd pi Qk+1 p]}
@@ -150,8 +217,7 @@
                     (update :p perc)
                     (update :pi (fnil perc 0))
                     (update :pd (fnil perc 0))
-                    (update :Qk+1 (fnil identity 0))
-                    ))
+                    (update :Qk+1 (fnil identity 0))))
               @*ds*)]
       (incanter/with-data
         (incanter/to-dataset ds)
@@ -160,8 +226,7 @@
               (i-charts/add-lines :t :pi)
               (i-charts/add-lines :t :pd)
               (i-charts/add-lines :t :p)
-              (i-charts/add-lines :t :Qk+1)
-              )
+              (i-charts/add-lines :t :Qk+1))
             (incanter/view)
             #_(incanter/save
                "/home/nathan/smbshare/imgs/test.png"))))))

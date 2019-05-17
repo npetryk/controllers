@@ -6,5 +6,7 @@
   :dependencies [[org.clojure/clojure "1.10.0"]
                  [com.rpl/specter "1.1.2"]
                  [incanter/incanter-core "1.9.3"]
-                 [incanter/incanter-charts "1.9.3"]]
+                 [incanter/incanter-charts "1.9.3"]
+                 [org.clojure/test.check "0.10.0-alpha4"]
+                 [org.clojure/core.async "0.4.490"]]
   :repl-options {:init-ns pi-pd.core})
